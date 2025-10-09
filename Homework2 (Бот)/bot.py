@@ -95,9 +95,8 @@ async def start_command(message: Message):
 
 @dp.message(Command("newprompt"))
 async def create_newprompt(message: Message):
-    """Команда /help"""
     await message.answer(
-         f"📖 <b>Ваш промпт:</b>\n<pre><code>{PROMPT_TEMPLATE}</code></pre>",
+         f"<b>Ваш промпт:</b>\n<pre><code>{PROMPT_TEMPLATE}</code></pre>",
         reply_markup=promt_create_button()
     )
 
@@ -108,15 +107,13 @@ async def process_new_prompt(message: Message, state: FSMContext):
     global PROMPT_TEMPLATE
     new_prompt_text = message.text
 
-    # Сохраняем в файл
     with open('prompt.txt', 'w', encoding='utf-8') as f:
         f.write(new_prompt_text)
 
-    # Обновляем в переменной
     PROMPT_TEMPLATE = new_prompt_text
 
     await message.answer("✅ Промпт успешно обновлен!")
-    await state.clear()  # Выходим из состояния
+    await state.clear()
 
 
 @dp.message(Command("help"))
@@ -154,12 +151,15 @@ async def new_prompt(callback):
     """Помощь через callback"""
     await create_newprompt(callback.message)
 
-@dp.callback_query(F.data == "np") # Изменил "newprompt" на "np" для краткости
+@dp.callback_query(F.data == "np")
 async def new_prompt_start(callback_query: CallbackQuery, state: FSMContext):
     """Начало обновления промпта"""
     await callback_query.message.answer("Пришлите новый текст для промпта.")
     await state.set_state(PromptUpdate.waiting_for_prompt)
     await callback_query.answer()
+
+
+
 
 @dp.message(F.text & ~F.text.startswith('/'))
 async def handle_text(message: Message):
