@@ -152,3 +152,5 @@ async def process_new_prompt(message: Message, state: FSMContext):
     await message.answer("✅ Ваш личный промпт успешно обновлен!")
     await state.clear()
 ```
+# Итог
+Бот запущен на сервере и работает 24/7 (пока оплачивается сервер)
