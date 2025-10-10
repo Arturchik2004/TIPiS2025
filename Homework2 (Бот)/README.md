@@ -154,3 +154,4 @@ async def process_new_prompt(message: Message, state: FSMContext):
 ```
 # Итог
 Бот запущен на сервере и работает 24/7 (пока оплачивается сервер)
+[https://t.me/tipislab2_bot](https://t.me/tipislab2_bot)
