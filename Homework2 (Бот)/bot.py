@@ -31,13 +31,26 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# Добавил возможность вынести промпт в отдельный файл)
-try:
-    with open('prompt.txt', 'r', encoding='utf-8') as f:
-        PROMPT_TEMPLATE = f.read()
-except FileNotFoundError:
-    print("Ошибка: Файл 'prompt.txt' не найден! Убедитесь, что он находится в той же папке.")
-    exit(1)
+
+
+PROMPT_TEMPLATE = """
+Проанализируй эту лабораторную работу студента и дай развернутую оценку.
+КРИТЕРИИ ОЦЕНКИ (100 баллов максимум):
+1. Качество кода и решения (0-30 баллов)
+2. Полнота и правильность реализации (0-30 баллов)
+3. Документация и комментарии (0-20 баллов)
+4. Оформление и структура работы (0-20 баллов)
+Дай конструктивную оценку:
+- Кратко опиши, что делает работа
+- Оцени каждый критерий с обоснованием
+- Укажи сильные стороны
+- Дай конкретные рекомендации для улучшения
+- Поставь итоговую оценку из 100 баллов
+
+Будь справедлив, но требователен. Пиши понятно для студента.
+Стиль: сжатый, деловой, без лишних отступов
+
+"""
 
 
 
@@ -45,7 +58,8 @@ except FileNotFoundError:
 class PromptUpdate(StatesGroup):
     waiting_for_prompt = State()
 
-
+class ParamsUpdate(StatesGroup):
+    waiting_for_params = State()
 
 if not BOT_TOKEN or not OPENROUTER_KEY:
     print("Добавьте токены в .env файл!")
@@ -63,7 +77,15 @@ openrouter = OpenAI(
     api_key=OPENROUTER_KEY,
     base_url="https://openrouter.ai/api/v1"
 )
-
+#Дефолт модель
+CURRENT_MODEL = "qwen/qwen3-235b-a22b:free"
+AI_PARAMS = {
+    "temperature": 0.1,
+    "max_tokens": 4000,
+    "top_p": 1.0,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0
+}
 # Поддерживаемые форматы
 SUPPORTED_FORMATS = ['.pdf', '.docx', '.txt']
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 МБ
@@ -80,6 +102,35 @@ def promt_create_button():
         [InlineKeyboardButton(text="❓ Перезаписать промпт", callback_data="np")]
     ])
 
+
+def get_models_keyboard():
+    models = [
+        "meta-llama/llama-4-maverick:free",
+        "google/gemini-2.5-pro-exp-03-25:free",
+        "deepseek/deepseek-chat-v3-0324:free",
+        "qwen/qwen3-235b-a22b:free"  # Добавил текущую для полноты
+    ]
+
+    keyboard = []
+    for model in models:
+        short_name = model.split('/')[1].split(':')[0]
+        keyboard.append([InlineKeyboardButton(text=f"{short_name}", callback_data=model)])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_params_button():
+    params = AI_PARAMS.keys()
+
+    keyboard = []
+    for param in params:
+        keyboard.append([InlineKeyboardButton(text=f"{param}", callback_data=param)])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+
+
 @dp.message(CommandStart())
 async def start_command(message: Message):
     """Команда /start"""
@@ -93,26 +144,65 @@ async def start_command(message: Message):
         reply_markup=get_main_keyboard()
     )
 
-@dp.message(Command("newprompt"))
-async def create_newprompt(message: Message):
+@dp.message(Command("newmodel"))
+async def select_model_command(message: Message):
+    """Команда для выбора модели"""
     await message.answer(
-         f"<b>Ваш промпт:</b>\n<pre><code>{PROMPT_TEMPLATE}</code></pre>",
+        f"Текущая модель: \n<pre><code>{CURRENT_MODEL}</code></pre>\n\n"
+        "Выберите новую модель из списка:",
+        reply_markup=get_models_keyboard()
+    )
+
+
+@dp.message(Command("newparams"))
+async def select_params_command(message: Message):
+    """Команда для выбора параметра для изменения"""
+    # Красиво форматируем текущие параметры для вывода
+    params_text = "\n".join([f"• <code>{key}</code> = <code>{value}</code>" for key, value in AI_PARAMS.items()])
+
+    await message.answer(
+        f"<b>Текущие параметры модели:</b>\n{params_text}\n\n"
+        "Выберите параметр для изменения:",
+        reply_markup=get_params_button()  # Используем твою клавиатуру
+    )
+
+@dp.message(ParamsUpdate.waiting_for_params)
+async def process_new_param_value(message: Message, state: FSMContext):
+    """Сохранение нового значения параметра"""
+    global AI_PARAMS
+    user_data = await state.get_data()
+    param_name = user_data.get('param_to_update')
+    new_value_str = message.text
+
+    try:
+        new_value = float(new_value_str)
+        AI_PARAMS[param_name] = new_value
+        await message.answer(f"✅ Параметр <code>{param_name}</code> обновлен на значение <code>{new_value}</code>")
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Ошибка. Пожалуйста, введите числовое значение (например, 0.7 или 1024).")
+
+
+
+@dp.message(Command("newprompt"))
+async def create_newprompt(message: Message, state: FSMContext):  # Добавляем state
+    user_data = await state.get_data()
+    current_prompt = user_data.get('user_prompt', PROMPT_TEMPLATE)
+
+    await message.answer(
+        f"<b>Ваш текущий промпт:</b>\n<pre><code>{current_prompt}</code></pre>",
         reply_markup=promt_create_button()
     )
 
 
+
+
 @dp.message(PromptUpdate.waiting_for_prompt)
 async def process_new_prompt(message: Message, state: FSMContext):
-    """Сохранение нового промпта"""
-    global PROMPT_TEMPLATE
+    """Сохранение нового промпта для конкретного пользователя"""
     new_prompt_text = message.text
-
-    with open('prompt.txt', 'w', encoding='utf-8') as f:
-        f.write(new_prompt_text)
-
-    PROMPT_TEMPLATE = new_prompt_text
-
-    await message.answer("✅ Промпт успешно обновлен!")
+    await state.update_data(user_prompt=new_prompt_text)
+    await message.answer("✅ Ваш личный промпт успешно обновлен!")
     await state.clear()
 
 
@@ -143,13 +233,20 @@ async def help_callback(callback):
     await help_command(callback.message)
 
 
+@dp.callback_query(lambda c: ':free' in c.data)  # Ловим все callback'и, где есть ':free'
+async def process_model_selection(callback_query: CallbackQuery):
+    """Обработка выбора модели"""
+    global CURRENT_MODEL
+    new_model = callback_query.data
+    CURRENT_MODEL = new_model
 
+    short_name = new_model.split('/')[1].split(':')[0]
 
+    await callback_query.message.edit_text(
+        f"✅ Модель успешно изменена на:\n<pre><code>{short_name}</code></pre>"
+    )
+    await callback_query.answer()
 
-@dp.callback_query(F.data == "newprompt")
-async def new_prompt(callback):
-    """Помощь через callback"""
-    await create_newprompt(callback.message)
 
 @dp.callback_query(F.data == "np")
 async def new_prompt_start(callback_query: CallbackQuery, state: FSMContext):
@@ -157,6 +254,19 @@ async def new_prompt_start(callback_query: CallbackQuery, state: FSMContext):
     await callback_query.message.answer("Пришлите новый текст для промпта.")
     await state.set_state(PromptUpdate.waiting_for_prompt)
     await callback_query.answer()
+
+
+# Этот callback будет ловить нажатия на кнопки с параметрами
+@dp.callback_query(F.data.in_(AI_PARAMS.keys()))
+async def start_param_update(callback_query: CallbackQuery, state: FSMContext):
+    """Начало обновления параметра"""
+    param_name = callback_query.data
+    await state.update_data(param_to_update=param_name)  # Сохраняем, какой параметр меняем
+
+    await callback_query.message.answer(f"Пришлите новое значение для параметра <code>{param_name}</code>:")
+    await state.set_state(ParamsUpdate.waiting_for_params)
+    await callback_query.answer()
+
 
 
 
@@ -177,7 +287,7 @@ async def handle_text(message: Message):
 
 
 @dp.message(F.document)
-async def handle_document(message: Message):
+async def handle_document(message: Message, state: FSMContext):
     """Обработка файла"""
     document = message.document
     file_name = document.file_name
@@ -256,8 +366,7 @@ async def handle_document(message: Message):
         )
         
         # Отправляем на проверку
-        result = await check_with_ai(content)
-        
+        result = await check_with_ai(content, state)
         # Удаляем временный файл
         if temp_path:
             os.unlink(temp_path)
@@ -304,18 +413,17 @@ async def handle_document(message: Message):
             reply_markup=get_main_keyboard()
         )
 
-async def check_with_ai(content: str) -> str:
+async def check_with_ai(content: str, state: FSMContext) -> str:
     """Проверка работы через OpenRouter"""
     prompt = PROMPT_TEMPLATE + f"\n\nСОДЕРЖИМОЕ РАБОТЫ:\n{content}"
 
     try:
         response = openrouter.chat.completions.create(
-            model="qwen/qwen3-235b-a22b:free",
+            model=CURRENT_MODEL,
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=4000,
-            temperature=0.1
+            **AI_PARAMS
         )
 
 
